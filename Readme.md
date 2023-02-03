@@ -10,6 +10,7 @@ cmake ..
 make
 ./tinyraytracer
 ```
+NB : le programme n'effectue que l'un des 3 rendus (2 autres à décommenter si vous voulez les tester)
 
 ## Rendus :
 ### normal 
@@ -17,3 +18,6 @@ make
 
 ### anaglyph
 <img src="./out/out_anaglyph.jpg">
+
+### stereoscope
+<img src="./out/out_stereo.jpg">

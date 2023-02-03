@@ -154,19 +154,18 @@ bool scene_intersect(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphe
 }
 
 Vec3f cast_ray(const Vec3f &orig, const Vec3f &dir, const std::vector<Sphere> &spheres, const std::vector<Light> &lights, size_t depth=0) {
-    Vec3f point, N, res;
+    Vec3f point, N;
     Material material;
 
     if (depth>4 || !scene_intersect(orig, dir, spheres, point, N, material)) {
-        //return Vec3f(0.2, 0.7, 0.8); // background color
-        float theta = std::acos(dir.y),
-        phi = std::atan2(dir.z, dir.x);
-
+        /*float theta = std::acos(dir.y),
+        phi = std::atan2(dir.z, dir.x)
         int i = ((phi / M_PI) + 1) / 2 * envmap_width,
         j = (theta / M_PI) * envmap_height;
-
-        res = envmap[i + j * envmap_width];
-        return res;
+        return envmap[i + j * envmap_width];*/
+        int i = std::max(0, std::min(envmap_width -1, static_cast<int>((atan2(dir.z, dir.x)/(2*M_PI) + .5)*envmap_width)));
+        int j = std::max(0, std::min(envmap_height-1, static_cast<int>(acos(dir.y)/M_PI*envmap_height)));
+        return envmap[i + j * envmap_width]; // background color
     }
 
     Vec3f reflect_dir = reflect(dir, N).normalize();
@@ -268,6 +267,79 @@ void render_anaglyph(const std::vector<Sphere> &spheres, const std::vector<Light
     stbi_write_jpg("out_anaglyph.jpg", width-delta, height, 3, pixmap.data(), 100);
 }
 
+
+void render_stereoscope(const std::vector<Sphere> &spheres, const std::vector<Light> &lights){
+    const float eyesep   = 0.2;
+    const int   delta    = 60; // focal distance 3
+    const int   width    = 960+delta;
+    const int   height   = 1080;
+    const float fov      = M_PI/3.;
+    std::vector<Vec3f> framebuffer1(width*height);
+    std::vector<Vec3f> framebuffer2(width*height);
+
+    #pragma omp parallel for
+    for (size_t j = 0; j<height; j++) { // actual rendering loop
+        for (size_t i = 0; i<width; i++) {
+            float dir_x =  (i + 0.5) -  width/2.;
+            float dir_y = -(j + 0.5) + height/2.;    // this flips the image at the same time
+            float dir_z = -height/(2.*tan(fov/2.));
+            framebuffer1[i+j*width] = cast_ray(Vec3f(-eyesep/2,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+            framebuffer2[i+j*width] = cast_ray(Vec3f(+eyesep/2,0,0), Vec3f(dir_x, dir_y, dir_z).normalize(), spheres, lights);
+        }
+    }
+
+    if (0) { // draw the white grid
+        for (size_t j = 0; j<height; j++) {
+            for (size_t i = 0; i<width; i+=width/10) {
+                framebuffer2[i+j*width] = Vec3f(1,1,1);
+                framebuffer1[i+j*width] = Vec3f(1,1,1);
+            }
+        }
+        for (size_t i = 0; i<width; i++) {
+            for (size_t j = 0; j<height; j+=height/10) {
+                framebuffer2[i+j*width] = Vec3f(1,1,1);
+                framebuffer1[i+j*width] = Vec3f(1,1,1);
+            }
+        }
+    }
+
+    const float k1 = 0.12;
+    const float k2 = 0.10;
+
+    const float xc = (width-delta)/2.;
+    const float yc = height/2.;
+    const float R = std::min(width-delta, height)/2.f;
+
+    std::vector<unsigned char> pixmap((width-delta)*height*3*2);
+    for (size_t j = 0; j<height; j++) {
+        for (size_t i = 0; i<width-delta; i++) {
+            float xd = i;
+            float yd = j;
+            float r = std::sqrt(pow(xd-xc, 2) + pow(yd-yc, 2))/R;
+
+            int xu = xc+(xd-xc)*(1+k1*pow(r,2)+k2*pow(r,4));
+            int yu = yc+(yd-yc)*(1+k1*pow(r,2)+k2*pow(r,4));
+
+            Vec3f c1 (0,0,0), c2(0,0,0);
+            if (xu>=0 && xu<width-delta && yu>=0 && yu<height) {
+                c1 = framebuffer2[xu+yu*width+delta];
+                c2 = framebuffer2[xu+yu*width];
+            }
+
+            float max2 = std::max(c2[0], std::max(c2[1], c2[2]));
+            if (max2>1) c2 = c2*(1./max2);
+            float max1 = std::max(c1[0], std::max(c1[1], c1[2]));
+            if (max1>1) c1 = c1*(1./max1);
+
+            for (size_t d=0; d<3; d++) {
+                pixmap[(j*(width-delta)*2 + i            )*3+d] = 255*c1[d];
+                pixmap[(j*(width-delta)*2 + i+width-delta)*3+d] = 255*c2[d];
+            }
+        }
+    }
+    stbi_write_jpg("out_stereo.jpg", (width-delta)*2, height, 3, pixmap.data(), 100);
+}
+
 int main() {
     int n = -1;
     unsigned char *pixmap = stbi_load("../envmap.jpg", &envmap_width, &envmap_height, &n, 0);
@@ -301,6 +373,7 @@ int main() {
 
     //render(spheres, lights);
     render_anaglyph(spheres, lights);
+    //render_stereoscope(spheres, lights);
 
     return 0;
 }
